@@ -8,8 +8,8 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://api.millnorwaycloud.com http://127.0.0.1:*">
 <title>Heaters</title>
 <style>
-:root{--bg:#f6f3ef;--card:#fff;--ink:#1c1a17;--mute:#7a736a;--line:#e7e1d9;--warm:#e2572b;--warm-soft:#fbe6dc;--cool:#3d6fb6;--cool-soft:#e3ecf8;--bad:#b3261e;--seg:#efeae4}
-@media (prefers-color-scheme:dark){:root{--bg:#12100e;--card:#1d1a17;--ink:#f3eee8;--mute:#9b9288;--line:#2c2823;--warm:#ff7a45;--warm-soft:#3a2117;--cool:#8fb4ff;--cool-soft:#1b2536;--bad:#ff8a80;--seg:#26221e}}
+:root{--bg:#f6f3ef;--card:#fff;--ink:#1c1a17;--mute:#7a736a;--line:#e7e1d9;--warm:#e2572b;--warm-soft:#fbe6dc;--cool:#3d6fb6;--cool-soft:#e3ecf8;--sleep:#6a5bd0;--bad:#b3261e;--seg:#efeae4}
+@media (prefers-color-scheme:dark){:root{--bg:#12100e;--card:#1d1a17;--ink:#f3eee8;--mute:#9b9288;--line:#2c2823;--warm:#ff7a45;--warm-soft:#3a2117;--cool:#8fb4ff;--cool-soft:#1b2536;--sleep:#a89bff;--bad:#ff8a80;--seg:#26221e}}
 *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:560px;margin:0 auto;padding:20px 16px 60px}
 header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:16px}
@@ -51,6 +51,20 @@ form{display:grid;gap:10px}form.login{margin-top:24px}
 input{font:inherit;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);width:100%}
 form.login button{padding:12px}
 .fine{font-size:13px;color:var(--mute)}
+select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;max-width:100%}
+.progrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:14px;color:var(--mute)}
+.week{display:grid;grid-template-columns:34px 1fr;gap:7px 10px;align-items:center;margin-top:14px;font-size:12px;color:var(--mute)}
+.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line)}.bar span{height:100%}
+.axis{display:flex;justify-content:space-between;font-size:11px;color:var(--mute);grid-column:2}
+.t-comfort{background:var(--warm)}.t-sleep{background:var(--sleep)}.t-away{background:var(--cool)}.t-off{background:var(--line)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--mute)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.editor{display:grid;gap:12px;margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+.chips{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.chips button{padding:8px 0;font-size:13px}.chips button[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.slot{display:grid;grid-template-columns:1fr 1.2fr 40px;gap:8px;align-items:center}
+.slot input{padding:8px 10px}.slot button{padding:0;height:40px}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:14px;max-width:calc(100% - 32px);opacity:0;transition:opacity .25s;pointer-events:none}
 .toast.show{opacity:1}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -137,12 +151,13 @@ function heater(d){const m=d.lastMetrics||{},des=(d.deviceSettings||{}).desired|
 async function fetchAll(){
  const hs=await mill('GET','houses'),out=[];
  for(const h of [...(hs.ownHouses||[]),...(hs.sharedHouses||[])]){
-  const house={id:h.id,name:h.name||'Home',vac:!!h.isVacationModeActive,vacEnd:h.vacationEndDate,rooms:[],loose:[]};
+  const house={id:h.id,name:h.name||'Home',vac:!!h.isVacationModeActive,vacEnd:h.vacationEndDate,rooms:[],loose:[],programs:null};
+  try{const p=await mill('GET',`houses/${h.id}/roomPrograms`);house.programs=Array.isArray(p)?p:(p.items||[])}catch(e){if(!e)throw e}  // schedules are optional, never block the page
   for(const r of (await mill('GET',`houses/${h.id}/devices`))||[]){
    if(!r.roomId)continue;
    const info=await mill('GET',`rooms/${r.roomId}/devices`);
    house.rooms.push({id:r.roomId,name:info.name||r.roomName||'Room',avg:info.averageTemperature,mode:info.mode,progMode:info.activeModeFromWeeklyProgram,
-    override:info.overrideModeType,overrideEnd:info.overrideEndDate,program:info.roomProgramName,
+    override:info.overrideModeType,overrideEnd:info.overrideEndDate,program:info.roomProgramName,programId:info.roomProgramId,
     comfort:info.roomComfortTemperature,sleep:info.roomSleepTemperature,away:info.roomAwayTemperature,
     heaters:(r.devices||[]).filter(d=>d.deviceId).map(heater)})}
   for(const d of (await mill('GET',`houses/${h.id}/devices/independent`)).items||[])if(d.deviceId)house.loose.push(heater(d));
@@ -156,6 +171,11 @@ const setRoomMode=(r,m)=>m==='schedule'?mill('DELETE',`rooms/${r.id}/mode/overri
 const setPresets=r=>mill('POST',`rooms/${r.id}/temperature`,{roomComfortTemperature:r.comfort,roomSleepTemperature:r.sleep,roomAwayTemperature:r.away});
 const startAway=(h,end)=>mill('POST',`houses/${h.id}/mode/vacation`,{startDate:Math.floor(Date.now()/1000),endDate:end,vacationTemperature:10,vacationModeType:'use_away_temperature',isVacationModeActive:true});
 const endAway=h=>mill('DELETE',`houses/${h.id}/mode/vacation`);
+// Weekly programs: endpoints and shapes taken from the Mill Android app 4.7.1 (HouseApi / WeeklyProgramViewModel)
+const createProgram=(h,name)=>mill('POST',`houses/${h.id}/roomPrograms`,{name});
+const saveProgram=(h,p)=>mill('PATCH',`houses/${h.id}/roomPrograms/${p.id}`,{name:p.name,data:p.data});
+const deleteProgram=(h,p)=>mill('DELETE',`houses/${h.id}/roomPrograms/${p.id}`);
+const assignProgram=(r,id)=>mill('POST',`rooms/${r.id}/program`,{roomProgramId:id});
 
 // ---- UI ----
 async function act(fn,msg){try{await fn();if(msg)toast(msg);setTimeout(load,1500)}catch(e){if(e)toast(e.message)}}
@@ -189,11 +209,75 @@ function fillState(c,h){const pill=$(c,'.pill');
  sw.onclick=()=>act(()=>setPower(h,!h.on),h.name+(h.on?' off':' on'));
  if(!h.online){const g=$(c,'.diag');g.hidden=false;g.textContent="Not reaching Mill's cloud (last report "+ago(h.seen)+"). Check it's on 2.4 GHz Wi-Fi with a decent signal.";sw.disabled=true}}
 
-function roomCard(r){const c=tpl('t-room');$(c,'.name').textContent=r.name;$(c,'.mode').textContent=roomMode(r);$(c,'.amb').textContent=fmt(r.avg);
+// ---- schedules ----
+const DAYS=['monday','tuesday','wednesday','thursday','friday','saturday','sunday'],DAYL=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const TYPES=['comfort','sleep','away','off'];
+const mins=t=>{const[a,b]=String(t||'0:0').split(':').map(Number);return(a||0)*60+(b||0)};
+const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+const sorted=a=>[...(a||[])].sort((x,y)=>mins(x.startTime)-mins(y.startTime));
+function carryIn(data,i){for(let k=1;k<=7;k++){const d=sorted(data[DAYS[(i-k+7)%7]]);if(d.length)return d[d.length-1].temperatureType}return'comfort'}
+function dayBar(data,i){const bar=el('div','bar'),s=sorted(data[DAYS[i]]);let t=0,type=carryIn(data,i);
+ const seg=(to,ty)=>{if(to>t){const sp=el('span','t-'+ty);sp.style.width=((to-t)/14.4)+'%';sp.title=cap(ty)+' '+hhmm(t)+'–'+hhmm(to);bar.append(sp)}t=to};
+ for(const x of s){seg(mins(x.startTime),type);type=x.temperatureType}seg(1440,type);return bar}
+function weekView(data){const w=el('div','week');DAYS.forEach((_,i)=>w.append(el('span',null,DAYL[i]),dayBar(data,i)));
+ const ax=el('div','axis');['00','06','12','18','24'].forEach(x=>ax.append(el('span',null,x)));w.append(el('span'),ax);return w}
+function legend(){const l=el('div','legend');TYPES.forEach(t=>{const s=el('span');const i=el('i','t-'+t);s.append(i,cap(t));l.append(s)});return l}
+
+function programCard(h,p,rooms){const c=el('section','card'),top=el('div','row'),info=el('div');
+ info.append(el('div','name',p.name||'Schedule'),el('div','sub',(()=>{const used=rooms.filter(r=>r.programId===p.id).map(r=>r.name);return used.length?'Used by '+used.join(', '):'Not used by any room'})()));
+ top.append(info);if(p.isDefault)top.append(el('span','pill','Default'));
+ const data=p.data||{},btns=el('div','btns'),edit=el('button',null,'Edit');
+ btns.append(edit);
+ if(!p.isDefault){const del=el('button',null,'Delete');del.onclick=()=>{if(confirm('Delete the schedule "'+p.name+'"?'))act(()=>deleteProgram(h,p),'Schedule deleted')};btns.append(del)}
+ c.append(top,weekView(data),legend(),btns);
+ edit.onclick=()=>{btns.hidden=true;c.append(editor(h,p,()=>{btns.hidden=false}))};
+ return c}
+
+function editor(h,p,onClose){
+ const data={};DAYS.forEach((d,i)=>{data[d]=sorted((p.data||{})[d]).map(x=>({startTime:hhmm(mins(x.startTime)),temperatureType:x.temperatureType||'comfort'}));
+  if(!data[d].length||mins(data[d][0].startTime)!==0)data[d].unshift({startTime:'00:00',temperatureType:carryIn(p.data||{},i)})});
+ const f=el('form','editor'),name=el('input');name.value=p.name||'';name.required=true;name.setAttribute('aria-label','Schedule name');
+ const chips=el('div','chips'),list=el('div'),preview=el('div');list.style.display='grid';list.style.gap='8px';let day=(new Date().getDay()+6)%7;
+ const redraw=()=>{chips.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',i===day));list.replaceChildren(...data[DAYS[day]].map(slot));preview.replaceChildren(weekView(data))};
+ DAYL.forEach((l,i)=>{const b=el('button',null,l);b.type='button';b.onclick=()=>{day=i;redraw()};chips.append(b)});
+ function slot(s,idx){const row=el('div','slot'),t=el('input'),sel=el('select'),x=el('button',null,'✕');
+  t.type='time';t.step=900;t.value=s.startTime;t.required=true;t.disabled=idx===0;t.setAttribute('aria-label','Start time');
+  t.onchange=()=>{s.startTime=t.value;data[DAYS[day]]=sorted(data[DAYS[day]]);redraw()};
+  TYPES.forEach(ty=>{const o=el('option',null,cap(ty));o.value=ty;sel.append(o)});sel.value=s.temperatureType;sel.setAttribute('aria-label','Mode from '+s.startTime);
+  sel.onchange=()=>{s.temperatureType=sel.value;redraw()};
+  x.type='button';x.setAttribute('aria-label','Remove '+s.startTime);x.disabled=idx===0;
+  x.onclick=()=>{data[DAYS[day]].splice(idx,1);redraw()};
+  row.append(t,sel,x);return row}
+ const add=el('button',null,'+ Add a change');add.type='button';
+ add.onclick=()=>{const d=data[DAYS[day]],last=d[d.length-1],m=Math.min(1425,mins(last.startTime)+120);
+  if(d.some(x=>mins(x.startTime)===m))return toast('Change the last time first');
+  d.push({startTime:hhmm(m),temperatureType:last.temperatureType==='comfort'?'sleep':'comfort'});redraw()};
+ const copy=(targets,label)=>{const b=el('button',null,label);b.type='button';
+  b.onclick=()=>{const src=data[DAYS[day]];targets().forEach(i=>{if(i!==day)data[DAYS[i]]=src.map(x=>({...x}))});redraw();toast(DAYL[day]+' copied')};return b};
+ const tools=el('div','btns');tools.append(add,copy(()=>[0,1,2,3,4],'Copy to weekdays'),copy(()=>[5,6],'Copy to weekend'),copy(()=>[0,1,2,3,4,5,6],'Copy to all days'));
+ const foot=el('div','row'),cancel=el('button',null,'Cancel'),save=el('button','primary','Save schedule');cancel.type='button';
+ cancel.onclick=()=>{f.remove();onClose()};foot.append(cancel,save);
+ f.onsubmit=e=>{e.preventDefault();
+  for(const d of DAYS){const s=data[d];if(new Set(s.map(x=>x.startTime)).size!==s.length)return toast(cap(d)+' has two changes at the same time')}
+  act(()=>saveProgram(h,{id:p.id,name:name.value.trim(),data}),'Schedule saved')};
+ f.append(name,chips,list,tools,el('div','sub','Preview'),preview,foot);redraw();return f}
+
+function scheduleSection(h){const nodes=[el('h2',null,'Schedules')];
+ h.programs.forEach(p=>nodes.push(programCard(h,p,h.rooms)));
+ const add=el('button',null,'+ New schedule');add.style.width='100%';
+ add.onclick=()=>{const n=prompt('Name for the new schedule');if(n&&n.trim())act(()=>createProgram(h,n.trim()),'Schedule created')};
+ nodes.push(add);return nodes}
+
+function roomCard(r,programs){const c=tpl('t-room');$(c,'.name').textContent=r.name;$(c,'.mode').textContent=roomMode(r);$(c,'.amb').textContent=fmt(r.avg);
  if(r.heaters.some(h=>h.online&&h.on&&h.heating))c.classList.add('heating');
  const cur=r.override?r.mode:r.mode==='off'?'off':'schedule';
  c.querySelectorAll('.seg button').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.m===cur);
   b.onclick=()=>{if(b.dataset.m!==cur)act(()=>setRoomMode(r,b.dataset.m),r.name+': '+(b.dataset.m==='schedule'?'back on schedule':cap(b.dataset.m)))}});
+ if(programs&&programs.length){const row=el('label','progrow'),sel=el('select');row.append(el('span',null,'Schedule'),sel);
+  if(!programs.some(p=>p.id===r.programId)){const o=el('option',null,r.program||'—');o.value='';sel.append(o)}
+  programs.forEach(p=>{const o=el('option',null,p.name);o.value=p.id;sel.append(o)});sel.value=r.programId&&programs.some(p=>p.id===r.programId)?r.programId:'';
+  sel.onchange=()=>{if(sel.value)act(()=>assignProgram(r,sel.value),r.name+' now follows '+sel.selectedOptions[0].textContent)};
+  $(c,'.seg').after(row)}
  const active=r.mode==='vacation'?'away':r.override?r.mode:r.progMode;let timer;
  for(const k of ['comfort','sleep','away']){const p=tpl('t-preset');$(p,'.sub').textContent=cap(k);const b=$(p,'b');b.textContent=fmt(r[k])+'°';
   if(k===active&&r.mode!=='off')p.classList.add('active');
@@ -216,8 +300,9 @@ let busy=false;
 async function load(){if(!store.get('refreshToken'))return login();if(busy)return;busy=true;chrome(true);
  try{const houses=await fetchAll(),nodes=[];
   for(const h of houses){nodes.push(houseCard(h));
-   if(h.rooms.length){nodes.push(el('h2',null,'Rooms'));h.rooms.forEach(r=>nodes.push(roomCard(r)))}
-   if(h.loose.length){nodes.push(el('h2',null,'Other heaters'));h.loose.forEach(x=>nodes.push(looseCard(x)))}}
+   if(h.rooms.length){nodes.push(el('h2',null,'Rooms'));h.rooms.forEach(r=>nodes.push(roomCard(r,h.programs)))}
+   if(h.loose.length){nodes.push(el('h2',null,'Other heaters'));h.loose.forEach(x=>nodes.push(looseCard(x)))}
+   if(h.programs)nodes.push(...scheduleSection(h))}
   nodes.length?show(...nodes):note('No homes on this Mill account.')}
  catch(e){if(e)note(e.message,'err')}finally{busy=false}}
 
@@ -231,6 +316,6 @@ document.getElementById('refresh').onclick=load;
 document.getElementById('logout').onclick=()=>signOut();
 // ponytail: 60 s poll per open tab; Mill rate-limits, don't go lower. Skipped while a form is open.
 setInterval(()=>{if(!document.hidden&&store.get('refreshToken')&&!app.querySelector('form:not([hidden])'))load()},60000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&store.get('refreshToken'))load()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&store.get('refreshToken')&&!app.querySelector('form:not([hidden])'))load()});
 load();
 </script></body></html>

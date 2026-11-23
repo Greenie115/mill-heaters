@@ -17,6 +17,14 @@ rooms = {"r1": {"id": "r1", "name": "Bedroom", "averageTemperature": 18.6, "mode
 devs = {"d1": {"room": "r1", "name": "Bedroom panel", "online": False, "on": True, "seen": now() - 3 * 864e5},
         "d2": {"room": "r2", "name": "Sofa heater", "online": True, "on": True, "seen": now() - 6e4},
         "d3": {"room": None, "name": "Garage", "online": True, "on": True, "seen": now() - 6e4, "t": 12}}
+wk = [{"startTime": "00:00", "temperatureType": "sleep"}, {"startTime": "06:30", "temperatureType": "comfort"},
+      {"startTime": "08:00", "temperatureType": "away"}, {"startTime": "17:00", "temperatureType": "comfort"},
+      {"startTime": "22:30", "temperatureType": "sleep"}]
+we = [{"startTime": "08:30", "temperatureType": "comfort"}, {"startTime": "23:00", "temperatureType": "sleep"}]
+programs = {"p1": {"id": "p1", "houseId": "h1", "name": "Weekdays", "isDefault": True,
+                   "data": {d: (we if d in ("saturday", "sunday") else wk) for d in
+                            ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")}}}
+for r in rooms.values(): r["roomProgramId"] = "p1"
 tokens = {"id": 0}
 log = []
 
@@ -62,6 +70,7 @@ class H(BaseHTTPRequestHandler):
             return self._j(200, [{"roomId": r, "roomName": rooms[r]["name"], "devices": [dev(i) for i in devs if devs[i]["room"] == r]} for r in rooms])
         if p == "/houses/h1/devices/independent": return self._j(200, {"items": [dev(i) for i in devs if not devs[i]["room"]]})
         if p.startswith("/rooms/"): return self._j(200, rooms[p.split("/")[2]])
+        if p == "/houses/h1/roomPrograms": return self._j(200, {"items": list(programs.values())})
         self._j(404, {"error": "not found"})
 
     def do_POST(self):
@@ -78,6 +87,12 @@ class H(BaseHTTPRequestHandler):
             r = rooms[p.split("/")[2]]; r.update(mode=b["mode"], overrideModeType=b["overrideModeType"])
         elif p.endswith("/temperature"):
             rooms[p.split("/")[2]].update(b)
+        elif p == "/houses/h1/roomPrograms":
+            i = f"p{len(programs) + 1}"
+            programs[i] = {"id": i, "houseId": "h1", "name": b["name"], "isDefault": False,
+                           "data": {d: [{"startTime": "00:00", "temperatureType": "comfort"}] for d in programs["p1"]["data"]}}
+        elif p.endswith("/program"):
+            r = rooms[p.split("/")[2]]; r.update(roomProgramId=b["roomProgramId"], roomProgramName=programs[b["roomProgramId"]]["name"])
         elif p == "/houses/h1/mode/vacation":
             house.update(isVacationModeActive=True, vacationEndDate=b["endDate"])
             for r in rooms.values(): r["mode"] = "vacation"
@@ -86,7 +101,9 @@ class H(BaseHTTPRequestHandler):
     def do_DELETE(self):
         if not self._authed(): return
         p = self.path; self._rec()
-        if p.endswith("/mode/override"):
+        if p.startswith("/houses/h1/roomPrograms/"):
+            programs.pop(p.rsplit("/", 1)[1], None)
+        elif p.endswith("/mode/override"):
             rooms[p.split("/")[2]].update(mode="weekly_program", overrideModeType=None)
         elif p == "/houses/h1/mode/vacation":
             house.update(isVacationModeActive=False, vacationEndDate=None)
@@ -96,6 +113,8 @@ class H(BaseHTTPRequestHandler):
     def do_PATCH(self):
         if not self._authed(): return
         b, i = self._body(), self.path.split("/")[2]; self._rec(b)
+        if self.path.startswith("/houses/h1/roomPrograms/"):
+            programs[self.path.rsplit("/", 1)[1]].update(name=b["name"], data=b["data"]); return self._j(200, {})
         mode = b["settings"].get("operation_mode")
         if mode == "control_individually" and devs[i]["room"] is None:  # what the old page did -> real cloud 409'd
             return self._j(409, {"errorCode": 409, "error": "Conflict"})
