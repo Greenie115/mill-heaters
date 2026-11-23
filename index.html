@@ -1,0 +1,127 @@
+<!doctype html>
+<!-- Mill heater controller: static page, talks to Mill's cloud API directly from the browser.
+     Host anywhere static (GitHub Pages). No server, no secrets in this file. -->
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#12100e">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://api.millnorwaycloud.com http://127.0.0.1:*; manifest-src 'self'">
+<title>Heaters</title>
+<style>
+:root{--bg:#f6f3ef;--card:#fff;--ink:#1c1a17;--mute:#7a736a;--line:#e7e1d9;--warm:#e2572b;--warm-soft:#fbe6dc;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#12100e;--card:#1d1a17;--ink:#f3eee8;--mute:#9b9288;--line:#2c2823;--warm:#ff7a45;--warm-soft:#3a2117;--bad:#ff8a80}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:560px;margin:0 auto;padding:20px 16px 60px}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:18px}
+h1{font-size:28px;letter-spacing:-.02em;margin:0}
+.actions{display:flex;gap:8px}
+button{font:inherit;color:inherit;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:8px 14px;cursor:pointer;transition:transform .08s,background .2s}
+button:active{transform:scale(.96)}button:disabled{opacity:.4;cursor:default}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:16px 18px;margin-bottom:12px;transition:border-color .3s}
+.card.heating{border-color:var(--warm)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.name{font-weight:650;font-size:18px}.sub{color:var(--mute);font-size:13px}
+.temps{margin-top:14px}.foot{margin-top:12px}
+.now{font-size:40px;font-weight:300;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.now small{font-size:16px;color:var(--mute)}
+.set{display:flex;align-items:center;gap:8px}
+.set b{min-width:64px;text-align:center;font-size:20px;font-variant-numeric:tabular-nums}
+.set button{width:44px;height:44px;padding:0;font-size:22px;border-radius:50%}
+.pill{font-size:12px;padding:3px 9px;border-radius:99px;white-space:nowrap;align-self:flex-start;border:1px solid var(--line);color:var(--mute)}
+.pill.on{background:var(--warm-soft);color:var(--warm);border-color:transparent}
+.pill.offline{color:var(--bad);border-color:var(--bad)}
+.switch{min-width:72px}.switch.on{background:var(--warm);border-color:var(--warm);color:#fff}
+.diag{margin-top:12px;font-size:13px;color:var(--bad);border-top:1px dashed var(--line);padding-top:10px}
+.msg{color:var(--mute);text-align:center;padding:40px 0}.err{color:var(--bad);min-height:1.4em}
+form{display:grid;gap:10px;margin-top:24px}label{font-size:14px;color:var(--mute)}
+input{font:inherit;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+form button{background:var(--warm);border-color:var(--warm);color:#fff;padding:12px}
+.fine{font-size:13px;color:var(--mute)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style></head><body><main>
+<header><h1>Heaters</h1><div class="actions"><button id="refresh" hidden>Refresh</button><button id="logout" hidden>Sign out</button></div></header>
+<div id="app" class="msg">Loading…</div></main>
+
+<template id="t-login"><form>
+ <label for="e">Mill account email</label><input id="e" type="email" autocomplete="username" required>
+ <label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required>
+ <div class="err"></div><button>Sign in</button>
+ <p class="fine">Your password goes straight to Mill and isn't saved. This device keeps you signed in until you sign out.</p>
+</form></template>
+
+<template id="t-card"><section class="card">
+ <div class="row"><div><div class="name"></div><div class="sub where"></div></div><span class="pill"></span></div>
+ <div class="row temps"><div class="now"><span class="amb"></span><small> °C now</small></div>
+  <div class="set"><button data-d="-0.5" aria-label="Lower target">−</button><b></b><button data-d="0.5" aria-label="Raise target">+</button></div></div>
+ <div class="row foot"><span class="sub seen"></span><button class="switch"></button></div>
+ <div class="diag" hidden></div></section></template>
+
+<script>
+// ponytail: API override only via localStorage (for local testing), never via URL, so a link can't redirect your login elsewhere
+const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}}};
+const API=store.get('millApi')||'https://api.millnorwaycloud.com/';
+const app=document.getElementById('app'),$=(el,s)=>el.querySelector(s);
+const fmt=t=>t==null?'–':(Math.round(t*10)/10).toFixed(1);
+const ago=ms=>{if(!ms)return'never';const m=Math.round((Date.now()-ms)/60000);return m<2?'just now':m<120?m+' min ago':m<2880?Math.round(m/60)+' h ago':Math.round(m/1440)+' days ago'};
+const tpl=id=>document.getElementById(id).content.firstElementChild.cloneNode(true);
+function show(...n){app.className='';app.replaceChildren(...n)}
+function note(text,cls){const p=document.createElement('p');p.className='msg '+(cls||'');p.textContent=text;show(p)}
+function chrome(signedIn){document.getElementById('refresh').hidden=document.getElementById('logout').hidden=!signedIn}
+
+class AuthError extends Error{}
+async function raw(method,path,body,token){
+ const r=await fetch(API+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body&&JSON.stringify(body)});
+ const t=await r.text();if(r.status===401)throw new AuthError('401');
+ if(!r.ok)throw new Error(r.status===429?'Mill is rate-limiting, wait a minute.':(t.includes('Incorrect login')?'Wrong email or password.':'Mill cloud error '+r.status));
+ try{return t?JSON.parse(t):{}}catch(e){if(t.includes('Incorrect login'))throw new Error('Wrong email or password.');throw new Error('Unexpected reply from Mill')}}
+function saveTokens(d){if(!d.idToken||!d.refreshToken)throw new Error('Sign-in failed.');store.set('idToken',d.idToken);store.set('refreshToken',d.refreshToken)}
+async function mill(method,path,body){
+ try{return await raw(method,path,body,store.get('idToken'))}
+ catch(e){if(!(e instanceof AuthError))throw e;
+  try{saveTokens(await raw('POST','customer/auth/refresh',null,store.get('refreshToken')))}catch(_){signOut('Signed out, please sign in again.');throw 0}
+  return raw(method,path,body,store.get('idToken'))}}
+
+function signOut(msg){store.set('idToken',null);store.set('refreshToken',null);login(msg)}
+function login(msg){chrome(false);const f=tpl('t-login');$(f,'.err').textContent=msg||'';show(f);
+ f.onsubmit=async e=>{e.preventDefault();const b=$(f,'button');b.disabled=true;$(f,'.err').textContent='';
+  try{saveTokens(await raw('POST','customer/auth/sign-in',{login:$(f,'#e').value.trim(),password:$(f,'#p').value}));load()}
+  catch(err){$(f,'.err').textContent=err instanceof AuthError?'Wrong email or password.':err.message;b.disabled=false}}}
+
+let devs=[];
+function parse(d,room){const m=d.lastMetrics||{},des=(d.deviceSettings||{}).desired||{},dt=d.deviceType||{};
+ return{id:d.deviceId,name:d.customName||(dt.childType||{}).name||d.deviceId,room,model:(dt.childType||{}).name||'',type:(dt.parentType||{}).name||'Heaters',
+  online:!!d.isConnected,ambient:m.temperatureAmbient,target:m.temperature??des.temperature_normal,
+  on:'operation_mode' in des?des.operation_mode!=='off':(m.powerStatus||0)>0,heating:(m.heaterFlag||0)>0,power:m.currentPower,seen:m.time}}
+async function fetchDevices(){const out=[];
+ for(const h of (await mill('GET','houses')).ownHouses||[]){
+  for(const r of (await mill('GET',`houses/${h.id}/devices`))||[])for(const d of r.devices||[])if(d.deviceId)out.push(parse(d,r.roomName||r.name||''));
+  for(const d of (await mill('GET',`houses/${h.id}/devices/independent`)).items||[])if(d.deviceId)out.push(parse(d,'No room'))}
+ return out}
+async function setDevice(d,{on,target}){
+ const settings={operation_mode:on===false?'off':'control_individually'};
+ if(target!=null)settings.temperature_normal=target;
+ await mill('PATCH',`devices/${d.id}/settings`,{deviceType:d.type,enabled:true,settings})}
+
+function card(d){const el=tpl('t-card');
+ if(d.online&&d.on&&d.heating)el.classList.add('heating');
+ $(el,'.name').textContent=d.name;$(el,'.where').textContent=[d.room,d.model].filter(Boolean).join(' · ');
+ const pill=$(el,'.pill');pill.textContent=!d.online?'Offline':d.on?(d.heating?'Heating':'On'):'Off';pill.classList.add(!d.online?'offline':d.on?'on':'off');
+ $(el,'.amb').textContent=fmt(d.ambient);
+ $(el,'.seen').textContent=(d.power?Math.round(d.power)+' W · ':'')+'seen '+ago(d.seen);
+ const sw=$(el,'.switch');sw.textContent=d.on?'On':'Off';sw.classList.toggle('on',d.on);sw.onclick=()=>act(d,{on:!d.on});
+ let t=d.target??20,timer;const b=$(el,'.set b');b.textContent=fmt(d.target)+'°';
+ el.querySelectorAll('.set button').forEach(x=>x.onclick=()=>{t=Math.min(35,Math.max(5,t+ +x.dataset.d));b.textContent=fmt(t)+'°';clearTimeout(timer);timer=setTimeout(()=>act(d,{target:t,on:true}),700)});
+ if(!d.online){const g=$(el,'.diag');g.hidden=false;g.textContent="Not reaching Mill's cloud (last report "+ago(d.seen)+"). Check it's on 2.4 GHz Wi-Fi with a decent signal.";el.querySelectorAll('button').forEach(x=>x.disabled=true)}
+ return el}
+async function act(d,change){try{await setDevice(d,change);setTimeout(load,1500)}catch(e){if(e)alert(e.message)}}
+let busy=false;
+async function load(){if(!store.get('refreshToken'))return login();if(busy)return;busy=true;chrome(true);
+ try{devs=await fetchDevices();devs.length?show(...devs.map(card)):note('No heaters on this Mill account.')}
+ catch(e){if(e)note(e.message,'err')}finally{busy=false}}
+document.getElementById('refresh').onclick=load;
+document.getElementById('logout').onclick=()=>signOut();
+// ponytail: 60 s poll per open tab; Mill rate-limits, don't go lower
+setInterval(()=>{if(!document.hidden&&store.get('refreshToken')&&!app.querySelector('form'))load()},60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&store.get('refreshToken'))load()});
+load();
+</script></body></html>
