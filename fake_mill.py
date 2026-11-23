@@ -65,7 +65,8 @@ class H(BaseHTTPRequestHandler):
             return self.wfile.write(Path(__file__).with_name("index.html").read_bytes())
         if not self._authed(): return
         p = self.path
-        if p == "/houses": return self._j(200, {"ownHouses": [house], "sharedHouses": []})
+        if p == "/houses":  # real shape: shared houses are wrapped (ShareHouse{house, permissions})
+            return self._j(200, {"ownHouses": [], "sharedHouses": [{"house": house, "permissions": {}}]})
         if p == "/houses/h1/devices":
             return self._j(200, [{"roomId": r, "roomName": rooms[r]["name"], "devices": [dev(i) for i in devs if devs[i]["room"] == r]} for r in rooms])
         if p == "/houses/h1/devices/independent": return self._j(200, {"items": [dev(i) for i in devs if not devs[i]["room"]]})

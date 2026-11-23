@@ -150,7 +150,9 @@ function heater(d){const m=d.lastMetrics||{},des=(d.deviceSettings||{}).desired|
 
 async function fetchAll(){
  const hs=await mill('GET','houses'),out=[];
- for(const h of [...(hs.ownHouses||[]),...(hs.sharedHouses||[])]){
+ // shared houses come wrapped as {house:{...}, permissions} (ShareHouse in the Mill app); skip anything without an id
+ const seen=new Set(),list=[...(hs.ownHouses||[]),...(hs.sharedHouses||[]).map(s=>s&&s.house?{...s.house,shared:true}:s)].filter(h=>h&&h.id&&!seen.has(h.id)&&seen.add(h.id));
+ for(const h of list){
   const house={id:h.id,name:h.name||'Home',vac:!!h.isVacationModeActive,vacEnd:h.vacationEndDate,rooms:[],loose:[],programs:null};
   try{const p=await mill('GET',`houses/${h.id}/roomPrograms`);house.programs=Array.isArray(p)?p:(p.items||[])}catch(e){if(!e)throw e}  // schedules are optional, never block the page
   for(const r of (await mill('GET',`houses/${h.id}/devices`))||[]){
